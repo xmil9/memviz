@@ -1,0 +1,52 @@
+# CMake / build output
+build/
+out/
+cmake-build-*/
+
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.VC.opendb
+ipch/
+
+# MSVC / linker
+*.obj
+*.o
+*.ilk
+*.pdb
+*.idb
+*.ipdb
+*.iobj
+*.exp
+*.lib
+*.dll
+*.exe
+*.manifest
+*.res
+*.pch
+
+# ImGui runtime settings (app disables this, but ignore if present)
+imgui.ini
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*~
+
+# Local scratch / test artifacts
+selftest.cpp
+selftest.exe
+build_selftest.bat
+shot.png
