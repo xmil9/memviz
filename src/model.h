@@ -86,4 +86,11 @@ struct BlockMetrics {
 };
 BlockMetrics analyzeBytes(const uint8_t* data, size_t n);
 
+// Max pixels-per-cell upscale that keeps the texture within MAX_TEX_DIM.
+int maxCellPixels(int gridW, int gridH);
+
+// Expand each source cell to cellPx x cellPx blocks for crisp zoomed display.
+void upscalePixels(const std::vector<uint32_t>& src, int srcW, int srcH,
+                   int cellPx, std::vector<uint32_t>& dst, int& dstW, int& dstH);
+
 }  // namespace model

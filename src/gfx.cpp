@@ -11,6 +11,8 @@ static ID3D11Device*           g_device = nullptr;
 static ID3D11DeviceContext*    g_context = nullptr;
 static IDXGISwapChain*         g_swapchain = nullptr;
 static ID3D11RenderTargetView* g_rtv = nullptr;
+static ID3D11SamplerState*     g_pointSampler = nullptr;
+static ID3D11SamplerState*     g_linearSampler = nullptr;
 
 ID3D11Device*           device() { return g_device; }
 ID3D11DeviceContext*    context() { return g_context; }
@@ -51,11 +53,36 @@ bool createDevice(HWND hwnd) {
     if (FAILED(hr)) return false;
 
     createRenderTarget();
+    createSamplers();
     return true;
+}
+
+void createSamplers() {
+    if (!g_device) return;
+    D3D11_SAMPLER_DESC sd{};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
+    g_device->CreateSamplerState(&sd, &g_pointSampler);
+
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    g_device->CreateSamplerState(&sd, &g_linearSampler);
+}
+
+void bindPointSampler() {
+    if (g_context && g_pointSampler)
+        g_context->PSSetSamplers(0, 1, &g_pointSampler);
+}
+
+void bindLinearSampler() {
+    if (g_context && g_linearSampler)
+        g_context->PSSetSamplers(0, 1, &g_linearSampler);
 }
 
 void cleanupDevice() {
     cleanupRenderTarget();
+    if (g_pointSampler) { g_pointSampler->Release(); g_pointSampler = nullptr; }
+    if (g_linearSampler) { g_linearSampler->Release(); g_linearSampler = nullptr; }
     if (g_swapchain) { g_swapchain->Release(); g_swapchain = nullptr; }
     if (g_context)   { g_context->Release();   g_context = nullptr; }
     if (g_device)    { g_device->Release();    g_device = nullptr; }

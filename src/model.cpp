@@ -309,4 +309,34 @@ bool resolveCell(const Grid& g, size_t index, size_t& regionIndex, uintptr_t& ad
     return true;
 }
 
+int maxCellPixels(int gridW, int gridH) {
+    int dim = std::max(gridW, gridH);
+    if (dim <= 0) return 1;
+    return MAX_TEX_DIM / dim;
+}
+
+void upscalePixels(const std::vector<uint32_t>& src, int srcW, int srcH,
+                   int cellPx, std::vector<uint32_t>& dst, int& dstW, int& dstH) {
+    if (cellPx < 1) cellPx = 1;
+    dstW = srcW * cellPx;
+    dstH = srcH * cellPx;
+    dst.assign((size_t)dstW * dstH, rgba(18, 18, 22));
+    if (srcW <= 0 || srcH <= 0 || src.empty()) return;
+
+    for (int cy = 0; cy < srcH; ++cy) {
+        for (int cx = 0; cx < srcW; ++cx) {
+            size_t srcIdx = (size_t)cy * srcW + cx;
+            if (srcIdx >= src.size()) return;
+            uint32_t c = src[srcIdx];
+            int dy0 = cy * cellPx;
+            int dx0 = cx * cellPx;
+            for (int py = 0; py < cellPx; ++py) {
+                uint32_t* row = dst.data() + (size_t)(dy0 + py) * dstW + dx0;
+                for (int px = 0; px < cellPx; ++px)
+                    row[px] = c;
+            }
+        }
+    }
+}
+
 }  // namespace model

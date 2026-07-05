@@ -18,6 +18,10 @@ void cleanupRenderTarget();
 void resizeBuffers(UINT width, UINT height);
 void present(bool vsync);
 
+void createSamplers();
+void bindPointSampler();
+void bindLinearSampler();
+
 ID3D11Device*           device();
 ID3D11DeviceContext*    context();
 IDXGISwapChain*         swapChain();

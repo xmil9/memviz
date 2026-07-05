@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <mutex>
@@ -174,10 +175,46 @@ static std::vector<memscan::ProcessInfo> g_procList;
 static char     g_filter[128] = "";
 static DWORD    g_selPid = 0;
 static float    g_zoom = 2.0f;
+static int      g_texCellPx = 1;   // pixels per grid cell in the uploaded texture
+static uint64_t g_texSourceVersion = 0;
+static std::vector<uint32_t> g_upscaledPixels;
 static bool     g_hasSel = false;
 static uintptr_t g_selAddr = 0;
 
 static void refreshProcessList() { g_procList = memscan::listProcesses(); }
+
+static int computeCellPx(float zoom, const model::Grid& grid) {
+    int cp = (zoom >= 1.0f) ? (int)std::ceil(zoom) : 1;
+    int maxCp = model::maxCellPixels(grid.width, grid.height);
+    if (cp > maxCp) cp = maxCp;
+    return std::max(1, cp);
+}
+
+static void refreshGridTexture(const std::shared_ptr<const model::Grid>& grid,
+                               gfx::Texture& tex, float zoom) {
+    if (!grid || grid->totalCells == 0) {
+        tex.release();
+        g_texCellPx = 0;
+        return;
+    }
+    g_texCellPx = computeCellPx(zoom, *grid);
+    if (g_texCellPx == 1) {
+        tex.update(grid->pixels.data(), grid->width, grid->height);
+        return;
+    }
+    int dstW = 0, dstH = 0;
+    model::upscalePixels(grid->pixels, grid->width, grid->height,
+                         g_texCellPx, g_upscaledPixels, dstW, dstH);
+    tex.update(g_upscaledPixels.data(), dstW, dstH);
+}
+
+static void imguiBindPointSampler(const ImDrawList*, const ImDrawCmd*) {
+    gfx::bindPointSampler();
+}
+
+static void imguiBindLinearSampler(const ImDrawList*, const ImDrawCmd*) {
+    gfx::bindLinearSampler();
+}
 
 static void drawToolbar(Shared& S) {
     int mode = (int)S.mode;
@@ -274,12 +311,20 @@ static void drawCanvas(Shared& S, const std::shared_ptr<const model::Grid>& grid
     }
 
     ImVec2 size((float)grid->width * g_zoom, (float)grid->height * g_zoom);
-    ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImGui::Image(tex.id(), size);
+    ImGui::InvisibleButton("##map", size);
     bool hovered = ImGui::IsItemHovered();
+    ImVec2 origin = ImGui::GetItemRectMin();
 
-    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (ImGui::IsItemVisible()) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 end(origin.x + size.x, origin.y + size.y);
+        dl->AddCallback(imguiBindPointSampler, nullptr);
+        dl->AddImage(tex.id(), origin, end);
+        dl->AddCallback(imguiBindLinearSampler, nullptr);
+    }
+
     ImGuiIO& io = ImGui::GetIO();
+    const float cellSize = g_zoom;
 
     // Wheel zoom while hovering the map.
     if (hovered && io.MouseWheel != 0.0f) {
@@ -294,13 +339,14 @@ static void drawCanvas(Shared& S, const std::shared_ptr<const model::Grid>& grid
     }
 
     if (hovered) {
-        int cx = (int)((io.MousePos.x - origin.x) / g_zoom);
-        int cy = (int)((io.MousePos.y - origin.y) / g_zoom);
+        int cx = (int)((io.MousePos.x - origin.x) / cellSize);
+        int cy = (int)((io.MousePos.y - origin.y) / cellSize);
         size_t idx = model::cellIndex(*grid, cx, cy);
         if (idx != SIZE_MAX) {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
             // outline hovered cell
-            ImVec2 a(origin.x + cx * g_zoom, origin.y + cy * g_zoom);
-            ImVec2 b(a.x + g_zoom, a.y + g_zoom);
+            ImVec2 a(origin.x + cx * cellSize, origin.y + cy * cellSize);
+            ImVec2 b(a.x + cellSize, a.y + cellSize);
             dl->AddRect(a, b, IM_COL32(255, 255, 255, 220));
 
             size_t ri; uintptr_t addr;
@@ -334,10 +380,11 @@ static void drawCanvas(Shared& S, const std::shared_ptr<const model::Grid>& grid
             size_t offCells = (g_selAddr - grid->regions[ri].base) / grid->cellBytes();
             size_t idx = grid->regionCellStart[ri] + offCells;
             if (idx < grid->totalCells) {
+                ImDrawList* dl = ImGui::GetWindowDrawList();
                 int cx = (int)(idx % grid->width);
                 int cy = (int)(idx / grid->width);
-                ImVec2 a(origin.x + cx * g_zoom, origin.y + cy * g_zoom);
-                ImVec2 b(a.x + g_zoom, a.y + g_zoom);
+                ImVec2 a(origin.x + cx * cellSize, origin.y + cy * cellSize);
+                ImVec2 b(a.x + cellSize, a.y + cellSize);
                 dl->AddRect(a, b, IM_COL32(255, 80, 80, 255), 0, 0, 2.0f);
             }
         }
@@ -502,7 +549,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
             g_resizeW = g_resizeH = 0;
         }
 
-        // Pull the latest published grid.
+        // Pull the latest published grid and refresh the display texture when the
+        // grid or zoom bucket (integer pixels-per-cell) changes.
         std::string status;
         DWORD attachedPid;
         {
@@ -510,13 +558,19 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
             if (g_shared.gridVersion != uiVersion) {
                 uiGrid = g_shared.grid;
                 uiVersion = g_shared.gridVersion;
-                if (uiGrid && uiGrid->totalCells)
-                    gridTex.update(uiGrid->pixels.data(), uiGrid->width, uiGrid->height);
-                else
-                    gridTex.release();
             }
             status = g_shared.status;
             attachedPid = g_shared.attachedPid;
+        }
+        if (uiGrid && uiGrid->totalCells) {
+            int wantCellPx = computeCellPx(g_zoom, *uiGrid);
+            if (uiVersion != g_texSourceVersion || wantCellPx != g_texCellPx)
+                refreshGridTexture(uiGrid, gridTex, g_zoom);
+            g_texSourceVersion = uiVersion;
+        } else if (gridTex.width() != 0) {
+            gridTex.release();
+            g_texCellPx = 0;
+            g_texSourceVersion = 0;
         }
 
         ImGui_ImplDX11_NewFrame();
